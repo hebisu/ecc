@@ -40,6 +40,7 @@ Node *term();
 Node *mul();
 Node *add();
 void error(char*, ...);
+void gen(Node *node);
 
 // Create new node
 Node *new_node(int ty, Node *lhs, Node *rhs) {
@@ -122,7 +123,8 @@ void tokenize(char *p) {
       continue;
     }
 
-    if (*p == '+' || *p == '-') {
+//    if (*p == '+' || *p == '-') {
+    if (*p == '+' || *p == '-' || *p == '*' || *p == '/' || *p == '(' || *p == ')' ) {
       tokens[i].ty = *p;
       tokens[i].input = p;
       i++;
@@ -161,6 +163,36 @@ void error(char *fmt, ...) {
 //   exit(1);
 // }
 
+void gen(Node *node) {
+  if (node->ty == ND_NUM) {
+    printf("  push %d\n", node->val);
+    return;
+  }
+
+  gen(node->lhs);
+  gen(node->rhs);
+
+  printf("  pop rdi\n");
+  printf("  pop rax\n");
+
+  switch (node->ty) {
+  case '+':
+    printf("  add rax, rdi\n");
+    break;
+  case '-':
+    printf("  sub rax, rdi\n");
+    break;
+  case '*':
+    printf("  mul rdi\n");
+    break;
+  case '/':
+    printf("  mov rdx, 0\n");
+    printf("  div rdi\n");
+  }
+
+  printf("  push rax\n");
+}
+
 //main function
 int main(int argc, char **argv) {
   if (argc != 2) {
@@ -168,13 +200,21 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  //Tokenize
   tokenize(argv[1]);
+  
+  //Parse
+  Node *node = add();
 
   // Output first half assembly
   printf(".intel_syntax noprefix\n");
   printf(".global main\n");
   printf("main:\n");
 
+  // Generate code going down abstract syntax tree
+  gen(node);
+
+/*
   // First character must be digit
   if (tokens[0].ty != TK_NUM) error("First character must be digit");
   printf("  mov rax, %d\n", tokens[0].val);
@@ -201,7 +241,11 @@ int main(int argc, char **argv) {
 
     error("Unexpected token: %s", tokens[i].input);
   }
-
+*/
+  
+  // Load the top of stack (it should be the result) to RAX
+  // And it return from function
+  printf("  pop rax\n");
   printf("  ret\n");
   return 0;
 }
