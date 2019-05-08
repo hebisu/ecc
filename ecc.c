@@ -39,6 +39,7 @@ typedef struct Node {
 Node *term();
 Node *mul();
 Node *add();
+Node *unary();
 void error(char*, ...);
 void gen(Node *node);
 
@@ -87,13 +88,13 @@ Node *term() {
 
 // Left-hand operator "*" or "/"
 Node *mul() {
-  Node *node = term();
+  Node *node = unary();
 
   while (1) {
     if (consume('*'))
-      node = new_node('*', node, term());
+      node = new_node('*', node, unary());
     else if (consume('/'))
-      node = new_node('/', node, term());
+      node = new_node('/', node, unary());
     else
       return node;
   }
@@ -111,6 +112,14 @@ Node *add() {
     else
       return node;
   }
+}
+
+Node *unary() {
+  if (consume('+'))
+    return term();
+  if (consume('-'))
+    return new_node('-', new_node_num(0), term());
+  return term();
 }
 
 // Separate p(char) with space and set to tokens
