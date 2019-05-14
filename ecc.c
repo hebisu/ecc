@@ -8,6 +8,10 @@
 
 // Token type
 enum {
+  TK_EQ  = 252, // Equal token "=="
+  TK_NE  = 253, // Not equal token "!="
+  TK_LE  = 254, // Less than or equal token "<="
+  TK_GE  = 255, // Greater than or equal token ">="
   TK_NUM = 256, // Integer token
   TK_EOF,       // End of token
 };
@@ -31,15 +35,20 @@ enum {
 
 typedef struct Node {
   int ty;           // Operator or ND_NUM
-  struct Node *lhs; // Left-hand side
-  struct Node *rhs; // Right-hand side
+  struct Node *lhs; // Left-hand side of tree structure
+  struct Node *rhs; // Right-hand side of tree structure
   int val;          // Use if ty is ND_NUM
 } Node;
 
-Node *term();
-Node *mul();
-Node *add();
-Node *unary();
+
+Node *expr(); // expr = equality
+Node *equality(); // = relational { ( "==" | "!=" ) relational }
+Node *relational(); // = add { ( "<" | "<=" | ">" | ">=" ) add }
+Node *add(); // = mul { ( "+" | "-" ) mul }
+Node *mul(); // = unary { ( "*" | "/" ) unary }
+Node *unary(); // = [ "+" | "-" ] term
+Node *term(); // = num | "(" expr ")"
+
 void error(char*, ...);
 void gen(Node *node);
 
@@ -67,11 +76,12 @@ int consume(int ty) {
   return 1; //TRUE
 }
 
-// term is "(" add ")" or num
+// term is "(" expr ")" or num
+// = num | "(" expr ")"
 Node *term() {
   // If next token is '(', "(" add ")" is expected
   if (consume('(')) {
-    Node *node = add();
+    Node *node = expr();
     if (!consume(')'))
       error("Second parenthesis is required: %s",
             tokens[pos].input);
@@ -87,6 +97,7 @@ Node *term() {
 }
 
 // Left-hand operator "*" or "/"
+// = unary { ( "*" | "/" ) unary }
 Node *mul() {
   Node *node = unary();
 
@@ -101,6 +112,7 @@ Node *mul() {
 }
 
 // Left-hand operator "+" or "-"
+// = mul { ( "+" | "-" ) mul }
 Node *add() {
   Node *node = mul();
 
@@ -114,12 +126,51 @@ Node *add() {
   }
 }
 
+// = [ "+" | "-" ] term
 Node *unary() {
   if (consume('+'))
     return term();
   if (consume('-'))
     return new_node('-', new_node_num(0), term());
   return term();
+}
+
+// = add { ( "<" | "<=" | ">" | ">=" ) add }
+Node *relational() {
+  Node *node = add();
+
+  while (1) {
+    if (consume('<'))
+      node = new_node('<', node, add());
+    else if (consume(TK_LE))//"<="
+      node = new_node(TK_LE, node, add());
+    else if (consume('>'))
+      node = new_node('>', add(), node); //Swap left and right side
+    else if (consume(TK_GE))//">="
+      node = new_node(TK_GE, add(), node); //Swap left and right side
+    else
+      return node;
+  }
+}
+
+// = relational { ( "==" | "!=" ) relational }
+Node *equality() {
+  Node *node = relational();
+  
+  while (1) {
+    if (consume(TK_EQ))
+      node = new_node(TK_EQ, node, relational());
+    else if (consume(TK_NE))
+      node = new_node(TK_NE, node, relational());
+    else
+      return node;
+  }
+}
+
+// expr = equality
+Node *expr() {
+  Node *node = equality();
+  return node;
 }
 
 // Separate p(char) with space and set to tokens
@@ -132,8 +183,36 @@ void tokenize(char *p) {
       continue;
     }
 
-//    if (*p == '+' || *p == '-') {
-    if (*p == '+' || *p == '-' || *p == '*' || *p == '/' || *p == '(' || *p == ')' ) {
+    if(strncmp(p, "==", 2) == 0) {//TK_EQ
+      tokens[i].ty = TK_EQ;
+      tokens[i].input = p;
+      i++;
+      p+=2;//Shift 2 characters
+      continue;    
+    } 
+    if(strncmp(p, "!=", 2) == 0) {//TK_NE
+      tokens[i].ty = TK_NE;
+      tokens[i].input = p;
+      i++;
+      p+=2;//Shift 2 characters
+      continue; 
+    }
+    if(strncmp(p, "<=", 2) == 0) {//TK_LE
+      tokens[i].ty = TK_LE;
+      tokens[i].input = p;
+      i++;
+      p+=2;//Shift 2 characters
+      continue; 
+    }
+    if(strncmp(p, ">=", 2) == 0) {//TK_GE
+      tokens[i].ty = TK_GE;
+      tokens[i].input = p;
+      i++;
+      p+=2;//Shift 2 characters
+      continue; 
+    }
+
+    if (*p == '+' || *p == '-' || *p == '*' || *p == '/' || *p == '(' || *p == ')' || *p == '>' || *p == '<') {
       tokens[i].ty = *p;
       tokens[i].input = p;
       i++;
@@ -144,7 +223,7 @@ void tokenize(char *p) {
     if (isdigit(*p)) {
       tokens[i].ty = TK_NUM;
       tokens[i].input = p;
-      tokens[i].val = strtol(p, &p, 10);
+      tokens[i].val = strtol(p, &p, 10);//Pointer p is shifted to non-digit point
       i++;
       continue;
     }
@@ -172,6 +251,7 @@ void error(char *fmt, ...) {
 //   exit(1);
 // }
 
+//Code generator
 void gen(Node *node) {
   if (node->ty == ND_NUM) {
     printf("  push %d\n", node->val);
@@ -197,6 +277,29 @@ void gen(Node *node) {
   case '/':
     printf("  mov rdx, 0\n");
     printf("  div rdi\n");
+    break;
+  case '>':
+  case '<':
+    printf("  cmp rax, rdi\n");
+    printf("  setl al\n");
+    printf("  movzb rax, al\n");       
+    break;
+  case TK_EQ:
+    printf("  cmp rax, rdi\n");
+    printf("  sete al\n");
+    printf("  movzb rax, al\n");
+    break;
+  case TK_NE:
+    printf("  cmp rax, rdi\n");
+    printf("  setne al\n");
+    printf("  movzb rax, al\n");    
+    break;
+  case TK_GE:
+  case TK_LE:
+    printf("  cmp rax, rdi\n");
+    printf("  setle al\n");
+    printf("  movzb rax, al\n");     
+    break;
   }
 
   printf("  push rax\n");
@@ -213,7 +316,7 @@ int main(int argc, char **argv) {
   tokenize(argv[1]);
   
   //Parse
-  Node *node = add();
+  Node *node = expr();
 
   // Output first half assembly
   printf(".intel_syntax noprefix\n");
